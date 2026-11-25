@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "appId": "db4f09e4-6333-482b-802f-deadd3f51d85",
+  "appDisplayName": "DPS Code App",
+  "region": "prod",
+  "appType": "CodeApp",
+  "environmentId": "Default-f55bca7d-52f5-4879-a453-6ea735b7d15e",
+  "description": " ",
+  "buildPath": "./dist",
+  "buildEntryPoint": "index.html",
+  "localAppUrl": "http://localhost:3000",
+  "logoPath": "Default",
+  "connectionReferences": {},
+  "databaseReferences": {}
+}
