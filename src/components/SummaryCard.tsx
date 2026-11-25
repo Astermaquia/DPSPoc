@@ -5,9 +5,7 @@ import {
   ClipboardTask24Regular,
   Clock24Regular,
 } from '@fluentui/react-icons'
-import type { summaryMetrics } from '../data/mockData'
-
-type SummaryMetric = (typeof summaryMetrics)[number]
+import type { SummaryMetric } from '../data/dashboardData'
 
 const metricIcons = {
   projects: <ClipboardTask24Regular />,

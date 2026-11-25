@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Button,
   Checkbox,
@@ -17,10 +17,19 @@ import {
   PrintRegular,
   Search24Regular,
 } from '@fluentui/react-icons'
+import {
+  createProjectRequest,
+  getProjectRequest,
+  requestTypes,
+  type ProjectRequestAction,
+  type ProjectRequestType,
+  updateProjectRequest,
+} from '../data/projectRequests'
 import './NewRequestScreen.css'
 
 interface NewRequestScreenProps {
   onClose: () => void
+  recordId: number | null
 }
 
 interface FormFieldProps {
@@ -47,6 +56,19 @@ const approvalPeople = [
   'Jordan Brooks',
   'Sam Patel',
 ]
+
+function formatSystemDate(value?: string): string {
+  const date = value ? new Date(value) : new Date()
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Not available'
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date)
+}
 
 function FormField({
   id,
@@ -79,14 +101,16 @@ function createRevisionRow(id: number): RevisionRow {
   }
 }
 
-function NewRequestScreen({ onClose }: NewRequestScreenProps) {
+function NewRequestScreen({ onClose, recordId }: NewRequestScreenProps) {
   const nextRowId = useRef(1)
-  const [projectType, setProjectType] = useState(
-    'Revision on existing projects',
+  const [projectType, setProjectType] = useState<ProjectRequestType>(
+    requestTypes.revision,
   )
   const [revisionType, setRevisionType] = useState(
     'Existing Direct Project - New Charging Node',
   )
+  const [requestNumber, setRequestNumber] = useState('')
+  const [systemDate, setSystemDate] = useState(() => formatSystemDate())
   const [projectLookup, setProjectLookup] = useState('')
   const [primaryNode, setPrimaryNode] = useState('')
   const [rows, setRows] = useState<RevisionRow[]>([])
@@ -95,7 +119,17 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
   const [tableSearchOpen, setTableSearchOpen] = useState(false)
   const [tableSearch, setTableSearch] = useState('')
   const [tableExpanded, setTableExpanded] = useState(false)
-  const [feedback, setFeedback] = useState('')
+  const [feedback, setFeedback] = useState(
+    recordId === null ? '' : 'Loading request from SharePoint...',
+  )
+  const [feedbackTone, setFeedbackTone] = useState<
+    'info' | 'success' | 'error'
+  >('info')
+  const [pendingAction, setPendingAction] =
+    useState<ProjectRequestAction | null>(null)
+  const [hasSaved, setHasSaved] = useState(false)
+  const [isLoadingRecord, setIsLoadingRecord] = useState(recordId !== null)
+  const [recordLoadError, setRecordLoadError] = useState(false)
 
   const visibleRows = rows.filter((row) =>
     `${row.costpointId} ${row.projectName}`
@@ -105,10 +139,68 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
   const allRowsSelected =
     rows.length > 0 && selectedRowIds.length === rows.length
 
+  const showFeedback = (
+    message: string,
+    tone: 'info' | 'success' | 'error' = 'info',
+  ) => {
+    setFeedback(message)
+    setFeedbackTone(tone)
+  }
+
+  useEffect(() => {
+    if (recordId === null) {
+      return
+    }
+
+    let isCurrent = true
+
+    getProjectRequest(recordId)
+      .then((record) => {
+        if (!isCurrent) {
+          return
+        }
+
+        setRequestNumber(record.field_1?.trim() || 'Pending assignment')
+        setSystemDate(formatSystemDate(record.Created))
+        if (
+          record.field_6 === requestTypes.newAward ||
+          record.field_6 === requestTypes.revision
+        ) {
+          setProjectType(record.field_6)
+        }
+        setProjectLookup(
+          record.Title?.trim() ||
+            (record.field_9 == null ? '' : String(record.field_9)),
+        )
+        setFeedback('')
+      })
+      .catch((cause: unknown) => {
+        if (!isCurrent) {
+          return
+        }
+
+        const errorMessage =
+          cause instanceof Error && cause.message
+            ? cause.message
+            : 'Unable to load the request from SharePoint.'
+        setRecordLoadError(true)
+        showFeedback(`Could not open this request: ${errorMessage}`, 'error')
+      })
+      .finally(() => {
+        if (isCurrent) {
+          setIsLoadingRecord(false)
+        }
+      })
+
+    return () => {
+      isCurrent = false
+    }
+  }, [recordId])
+
   const addRows = () => {
     const count = Number(rowsToAdd)
     if (!Number.isInteger(count) || count < 1 || count > 50) {
-      setFeedback('Enter a row count between 1 and 50.')
+      showFeedback('Enter a row count between 1 and 50.', 'error')
       return
     }
 
@@ -116,7 +208,7 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
       createRevisionRow(nextRowId.current++),
     )
     setRows((currentRows) => [...currentRows, ...newRows])
-    setFeedback('')
+    showFeedback('')
   }
 
   const updateRow = (
@@ -143,10 +235,77 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
     setSelectedRowIds(selected ? rows.map((row) => row.id) : [])
   }
 
+  const persistRequest = async (action: ProjectRequestAction) => {
+    if (
+      pendingAction ||
+      (recordId === null && hasSaved) ||
+      (recordId !== null && (isLoadingRecord || recordLoadError))
+    ) {
+      return
+    }
+
+    const title = projectLookup.trim()
+    if (!title) {
+      showFeedback('Project Lookup is required before saving.', 'error')
+      return
+    }
+
+    const parsedProjectNumber = Number(title)
+    setPendingAction(action)
+    showFeedback(
+      action === 'save'
+        ? 'Saving draft to SharePoint...'
+        : 'Submitting request to SharePoint...',
+    )
+
+    try {
+      const requestFields = {
+        action,
+        projectNumber: Number.isFinite(parsedProjectNumber)
+          ? parsedProjectNumber
+          : undefined,
+        requestType: projectType,
+        title,
+      }
+
+      if (recordId === null) {
+        await createProjectRequest(requestFields)
+        setHasSaved(true)
+        showFeedback(
+          action === 'save'
+            ? 'Draft saved to SharePoint. A request number will be assigned automatically.'
+            : 'Request submitted to SharePoint. A request number will be assigned automatically.',
+          'success',
+        )
+      } else {
+        await updateProjectRequest({ ...requestFields, recordId })
+        showFeedback(
+          action === 'save'
+            ? 'Changes saved. The current workflow status was preserved.'
+            : 'Changes saved and submitted for Project Setup Review.',
+          'success',
+        )
+      }
+    } catch (cause: unknown) {
+      const errorMessage =
+        cause instanceof Error && cause.message
+          ? cause.message
+          : 'An unexpected SharePoint error occurred.'
+      showFeedback(
+        `Could not ${action === 'save' ? 'save' : 'submit'} the request: ${errorMessage}`,
+        'error',
+      )
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
   return (
     <div className="request-form-shell">
       <header className="request-form-topbar">
-        <div className="request-form-title">New Request</div>
+        <div className="request-form-title">
+          {recordId === null ? 'New Request' : 'Edit Request'}
+        </div>
         <div className="request-form-topbar-actions">
           <Button
             aria-label="Print request"
@@ -155,8 +314,9 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
             onClick={() => window.print()}
           />
           <Button
-            aria-label="Close new request"
+            aria-label={recordId === null ? 'Close new request' : 'Close edit request'}
             appearance="subtle"
+            disabled={pendingAction !== null}
             icon={<DismissRegular />}
             onClick={onClose}
           />
@@ -184,7 +344,7 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
                 <button
                   className="request-inline-link"
                   onClick={() =>
-                    setFeedback('Technical support links are not connected.')
+                    showFeedback('Technical support links are not connected.')
                   }
                   type="button"
                 >
@@ -204,7 +364,7 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
                   id="request-number"
                   readOnly
                   size="large"
-                  value=""
+                  value={requestNumber}
                 />
               </FormField>
               <FormField
@@ -216,7 +376,7 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
                   id="system-date"
                   readOnly
                   size="large"
-                  value="11/20/2026, 9:07 AM"
+                  value={systemDate}
                 />
               </FormField>
             </div>
@@ -229,20 +389,28 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
             >
               <Select
                 id="project-type"
-                onChange={(event) => setProjectType(event.target.value)}
+                onChange={(event) => {
+                  const value = event.target.value
+                  if (
+                    value === requestTypes.newAward ||
+                    value === requestTypes.revision
+                  ) {
+                    setProjectType(value)
+                  }
+                }}
                 size="large"
                 value={projectType}
               >
-                <option value="New Award Confirmation (CMS Only)">
+                <option value={requestTypes.newAward}>
                   New Award Confirmation (CMS Only)
                 </option>
-                <option value="Revision on existing projects">
+                <option value={requestTypes.revision}>
                   Revision on existing projects
                 </option>
               </Select>
             </FormField>
 
-            {projectType === 'Revision on existing projects' && (
+            {projectType === requestTypes.revision && (
               <FormField
                 id="revision-type"
                 label="Revision Type on Existing Project"
@@ -339,6 +507,7 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
               <Input
                 contentAfter={<Search24Regular />}
                 id="project-lookup"
+                maxLength={255}
                 onChange={(_, data) => setProjectLookup(data.value)}
                 placeholder="Search Costpoint projects"
                 size="large"
@@ -377,7 +546,7 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
                   <button
                     className="request-inline-link"
                     onClick={() =>
-                      setFeedback('The template is not connected in this preview.')
+                      showFeedback('The template is not connected in this preview.')
                     }
                     type="button"
                   >
@@ -396,7 +565,7 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
                   <button
                     className="request-inline-link"
                     onClick={() =>
-                      setFeedback('The template is not connected in this preview.')
+                      showFeedback('The template is not connected in this preview.')
                     }
                     type="button"
                   >
@@ -426,14 +595,16 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
                   aria-label="Sort revision rows"
                   appearance="secondary"
                   icon={<ArrowSortRegular />}
-                  onClick={() => setFeedback('Row sorting is a UI preview only.')}
+                  onClick={() =>
+                    showFeedback('Row sorting is a UI preview only.')
+                  }
                   size="large"
                 />
                 <Button
                   appearance="secondary"
                   icon={<ArrowDownloadRegular />}
                   onClick={() =>
-                    setFeedback('CSV import is not connected in this preview.')
+                    showFeedback('CSV import is not connected in this preview.')
                   }
                   size="large"
                 >
@@ -605,28 +776,51 @@ function NewRequestScreen({ onClose }: NewRequestScreenProps) {
       </div>
 
       <footer className="request-form-footer">
-        <div aria-live="polite" className="request-form-feedback">
+        <div
+          aria-live="polite"
+          className={`request-form-feedback is-${feedbackTone}`}
+        >
           {feedback}
         </div>
         <div className="request-form-actions">
           <Button
             appearance="secondary"
-            onClick={() =>
-              setFeedback('Preview only — this draft has not been saved.')
+            disabled={
+              pendingAction !== null ||
+              isLoadingRecord ||
+              recordLoadError ||
+              (recordId === null && hasSaved)
             }
+            onClick={() => void persistRequest('save')}
           >
-            Save
+            {pendingAction === 'save'
+              ? 'Saving...'
+              : recordId === null
+                ? 'Save'
+                : 'Save changes'}
           </Button>
-          <Button appearance="secondary" onClick={onClose}>
-            Discard
+          <Button
+            appearance="secondary"
+            disabled={pendingAction !== null}
+            onClick={onClose}
+          >
+            {recordId !== null ? 'Cancel' : hasSaved ? 'Close' : 'Discard'}
           </Button>
           <Button
             appearance="primary"
-            onClick={() =>
-              setFeedback('Preview only — this request has not been submitted.')
+            disabled={
+              pendingAction !== null ||
+              isLoadingRecord ||
+              recordLoadError ||
+              (recordId === null && hasSaved)
             }
+            onClick={() => void persistRequest('submit')}
           >
-            Submit
+            {pendingAction === 'submit'
+              ? 'Submitting...'
+              : recordId === null
+                ? 'Submit'
+                : 'Submit changes'}
           </Button>
         </div>
       </footer>

@@ -10,6 +10,31 @@
   "buildEntryPoint": "index.html",
   "localAppUrl": "http://localhost:3000",
   "logoPath": "Default",
-  "connectionReferences": {},
+  "connectionReferences": {
+    "a1517197-3ab8-4558-b029-df006c932e8a": {
+      "id": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+      "displayName": "SharePoint",
+      "dataSources": [
+        "directprojectsetup",
+        "directprojectsetup_1"
+      ],
+      "dataSets": {
+        "https://astercopilot.sharepoint.com/": {
+          "dataSources": {
+            "directprojectsetup": {
+              "tableName": "11bc35e1-13e6-4b20-b0ae-45c3014b8ed2"
+            }
+          }
+        },
+        "https://astercopilot.sharepoint.com": {
+          "dataSources": {
+            "directprojectsetup_1": {
+              "tableName": "Direct Project Setup"
+            }
+          }
+        }
+      }
+    }
+  },
   "databaseReferences": {}
 }

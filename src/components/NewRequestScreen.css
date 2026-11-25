@@ -405,6 +405,14 @@
   min-width: 0;
 }
 
+.request-form-feedback.is-success {
+  color: #147d45;
+}
+
+.request-form-feedback.is-error {
+  color: #b42318;
+}
+
 .request-form-actions {
   align-items: center;
   display: flex;

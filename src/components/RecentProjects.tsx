@@ -1,32 +1,35 @@
 import { useState } from 'react'
 import {
   Avatar,
-  Badge,
   Button,
   Card,
   Input,
   Text,
 } from '@fluentui/react-components'
 import { ArrowRight24Regular, Search24Regular } from '@fluentui/react-icons'
-import { recentProjects } from '../data/mockData'
+import type { Project } from '../data/dashboardData'
+import ProjectStatusBadge from './ProjectStatusBadge'
 
 interface RecentProjectsProps {
+  projects: Project[]
+  isLoading: boolean
+  error: string | null
   onViewAll: () => void
 }
 
-const statusColor = {
-  'In progress': 'informative',
-  'In review': 'warning',
-  Completed: 'success',
-} as const
-
-function RecentProjects({ onViewAll }: RecentProjectsProps) {
+function RecentProjects({
+  projects,
+  isLoading,
+  error,
+  onViewAll,
+}: RecentProjectsProps) {
   const [searchText, setSearchText] = useState('')
-  const filteredProjects = recentProjects.filter((project) =>
+  const matchingProjects = projects.filter((project) =>
     `${project.name} ${project.id} ${project.category}`
       .toLowerCase()
       .includes(searchText.toLowerCase()),
   )
+  const visibleProjects = matchingProjects.slice(0, 5)
 
   return (
     <Card className="dashboard-panel">
@@ -50,7 +53,7 @@ function RecentProjects({ onViewAll }: RecentProjectsProps) {
         />
       </div>
       <div className="projects-table-wrap">
-        <table className="projects-table">
+        <table aria-busy={isLoading} className="projects-table">
           <thead>
             <tr>
               <th scope="col">Project</th>
@@ -61,8 +64,8 @@ function RecentProjects({ onViewAll }: RecentProjectsProps) {
             </tr>
           </thead>
           <tbody>
-            {filteredProjects.map((project) => (
-              <tr key={project.id}>
+            {visibleProjects.map((project) => (
+              <tr key={project.key}>
                 <td>
                   <div className="project-metadata">
                     <Text className="project-name">{project.name}</Text>
@@ -71,14 +74,7 @@ function RecentProjects({ onViewAll }: RecentProjectsProps) {
                 </td>
                 <td>{project.category}</td>
                 <td>
-                  <Badge
-                    appearance="tint"
-                    color={statusColor[project.status]}
-                    className="project-status"
-                    size="small"
-                  >
-                    {project.status}
-                  </Badge>
+                  <ProjectStatusBadge status={project.status} />
                 </td>
                 <td>{project.updated}</td>
                 <td>
@@ -94,9 +90,23 @@ function RecentProjects({ onViewAll }: RecentProjectsProps) {
                 </td>
               </tr>
             ))}
-            {filteredProjects.length === 0 && (
+            {isLoading && (
               <tr>
-                <td colSpan={5}>No projects match your search.</td>
+                <td colSpan={5}>Loading project requests from SharePoint...</td>
+              </tr>
+            )}
+            {!isLoading && error && (
+              <tr>
+                <td colSpan={5}>Project requests are unavailable.</td>
+              </tr>
+            )}
+            {!isLoading && !error && visibleProjects.length === 0 && (
+              <tr>
+                <td colSpan={5}>
+                  {searchText
+                    ? 'No projects match your search.'
+                    : 'No project requests found.'}
+                </td>
               </tr>
             )}
           </tbody>
@@ -104,7 +114,8 @@ function RecentProjects({ onViewAll }: RecentProjectsProps) {
       </div>
       <div className="panel-heading">
         <Text className="panel-subtitle">
-          Showing {filteredProjects.length} of {recentProjects.length} projects
+          Showing {visibleProjects.length} of {matchingProjects.length} matching
+          projects
         </Text>
         <Button
           appearance="subtle"
